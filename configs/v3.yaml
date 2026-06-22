@@ -1,0 +1,42 @@
+version: 3
+seed: 42
+paths:
+  ratings: ratings.csv
+  movies: movies.csv
+  prepared_dir: data/processed
+  artifacts_dir: artifacts
+data:
+  chunk_size: 1000000
+  rating_min: 0.5
+  rating_max: 5.0
+lifecycle:
+  cold_max: 19
+  sparse_max: 49
+temporal:
+  old_fraction: 0.30
+  recent_context_fraction: 0.40
+  holdout_fraction: 0.30
+  stable_quantile: 0.25
+  volatile_quantile: 0.75
+model:
+  factors: 20
+  min_relevant_rating: 4.0
+  quality_quantile: 0.60
+  stable_long_term_weight: 0.50
+  moderate_long_term_weight: 0.30
+  sparse_cf_weight_min: 0.25
+  sparse_cf_weight_max: 0.60
+  relevance_weight: 0.75
+  quality_weight: 0.15
+  popularity_weight: 0.10
+content:
+  ngram_min: 1
+  ngram_max: 2
+  min_df: 2
+  max_df: 0.90
+evaluation:
+  k_values: [10, 20]
+  max_users: 2000
+  bootstrap_samples: 500
+  confidence: 0.95
+
