@@ -2,6 +2,161 @@
 
 > A production-inspired recommendation system that adapts to both user lifecycle stages and evolving user preferences over time.
 
+## TenFlix V4 — live rating-aware recommendation layer
+
+V4 is the current product-facing implementation. It preserves V3 as an offline benchmark
+and adds the missing web-application boundary:
+
+* biased explicit matrix factorization with user/item biases;
+* immediate regularized user fold-in after a rating;
+* typed onboarding, organic, recommendation, imported, and legacy events;
+* positive and negative content profiles using genres, year, and decade;
+* evidence-based temporal eligibility and continuous recency weighting;
+* collaborative, content, quality/popularity, recent, and exploration candidates;
+* lifecycle-aware linear reranking, bounded freshness, and MMR diversity;
+* repository protocols, an in-process service, and an optional FastAPI adapter;
+* schema-4 artifacts and strict promotion gates.
+
+### V4 commands
+
+Install the editable project with development and optional HTTP dependencies:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev,service]"
+```
+
+Place MovieLens `ratings.csv` and `movies.csv` in the repository root, then run:
+
+```powershell
+tenflix-v4 prepare-data --config configs/v4.yaml
+tenflix-v4 tune --config configs/v4.yaml
+tenflix-v4 train --config configs/v4.yaml --mode evaluation --run-id movielens-v4-eval
+tenflix-v4 evaluate --run artifacts/movielens-v4-eval
+tenflix-v4 recommend --run artifacts/movielens-v4-eval --user-id 1 --top-k 10
+tenflix-v4 preview --run artifacts/movielens-v4-eval --ratings ratings-preview.json
+tenflix-v4 promote --run artifacts/movielens-v4-eval
+```
+
+`tune` is the expensive full methodology path. For a quick local smoke run it may be
+skipped; `train` then uses `configs/v4.yaml`. When tuning output exists in
+`data/processed-v4/v4-tuning.json`, training applies the selected MF parameters,
+learned feature statistics, lifecycle weights, and MMR strength automatically.
+
+`promote` refuses any run whose evaluation report does not satisfy every accuracy,
+coverage, diversity, temporal, cold-start, and latency gate. `serve` additionally requires
+a promoted production artifact.
+
+### Latest V4 full-dataset verification
+
+The `movielens-v4-eval` artifact was trained from all 20,000,263 ratings using the
+global chronological protocol and evaluated on all 4,898 users with both pre-cutoff
+context and relevant, release-eligible test events. It is correctly marked
+`validated: false`; no production artifact was promoted.
+
+| System | NDCG@10 | Recall@10 | Catalog coverage |
+| --- | ---: | ---: | ---: |
+| Popularity-quality | 0.1048 | 0.0306 | 0.0114 |
+| Static biased MF | 0.0376 | 0.0118 | 0.2108 |
+| Recency-aware biased MF | 0.0511 | 0.0151 | 0.1875 |
+| Full V4 | **0.1117** | **0.0354** | 0.1207 |
+
+Full V4 beats popularity and static MF with positive 95% paired-bootstrap lower
+bounds. Recency-aware MF also beats static MF for temporally eligible users, and the
+genre-aware cold simulation passes. Genre diversity is 0.7814. Promotion is blocked
+because coverage is below 0.15 and measured recommendation p95 was 379 ms, above the
+250 ms gate. Fold-in plus recommendation p95 was 409 ms and passed its 500 ms gate.
+The serving hot path was optimized after this report; rerun `evaluate` before using new
+latency numbers for promotion.
+
+The repository-wide logic audit subsequently corrected onboarding tokenization,
+single-rating content evidence, item-bias fallback, cache identity, HTTP POST validation,
+promotion enforcement, evaluation sampling/coverage semantics, and tuning normalization.
+The saved run remains loadable, but its metrics describe the pre-audit artifact. Retrain
+and reevaluate before treating the current source tree as benchmarked.
+
+### Live service contract
+
+The engine exposes `RatingRepository` and `CatalogRepository` protocols so the future web
+backend can provide PostgreSQL adapters without coupling database code to the ML package.
+`RecommendationService.record_rating()` invalidates the cached profile immediately;
+`recommend()` folds the current rating history into fixed global item factors without a
+global retrain.
+
+The optional HTTP adapter exposes:
+
+```text
+POST /v1/ratings
+GET  /v1/recommendations/{user_id}
+POST /v1/recommendations/preview
+GET  /v1/health
+GET  /v1/model
+```
+
+## TenFlix v3 benchmark implementation
+
+> Historical note: V3 remains the validated methodology baseline, but V4 is now the
+> active implementation for future web-app integration.
+
+The executable implementation now lives in `src/tenflix`. `TenFlix_v1.ipynb` and
+`TenFlix_v2.ipynb` are retained as historical experiments and their saved temporal
+metrics and drift values are **not valid regression targets**. They used independently
+fitted temporal SVD spaces, trained recent embeddings on evaluation holdout interactions,
+and passed recommendation DataFrames to metric functions expecting movie-ID sequences.
+
+V3 permanently addresses those problems with:
+
+* one shared latent item space and global ID mappings;
+* a per-user chronological 30% old / 40% recent-context / 30% future-holdout split;
+* training-context-only rating centering, popularity, quality, and drift thresholds;
+* sparse query-time TF-IDF scoring without a dense movie-by-movie matrix;
+* one lifecycle router and an ordered, typed recommendation result;
+* versioned, hash-verified artifacts and segment-level offline evaluation.
+
+### Lifecycle policy
+
+| Stage | Observed interactions | V3 strategy |
+| --- | ---: | --- |
+| New | 0 | Selected-genre content model |
+| Cold | 1–19 | Interaction-derived content model |
+| Sparse | 20–49 | Content/collaborative blend |
+| Mature | 50+ | Drift-aware temporal collaborative model |
+
+### Install and run
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+tenflix prepare-data --config configs/v3.yaml
+tenflix train --config configs/v3.yaml --mode evaluation --run-id movielens-v3-eval
+tenflix evaluate --run artifacts/movielens-v3-eval
+tenflix recommend --run artifacts/movielens-v3-eval --user-id 1 --top-k 10
+tenflix recommend --run artifacts/movielens-v3-eval --genres Action Sci-Fi --top-k 10
+```
+
+`evaluate` exits with code 2 when the statistical acceptance gates are not met. A
+completed run is only described as validated when hybrid NDCG@10 and Recall@10 beat
+the popularity baseline for mature moderate/volatile users with a positive paired
+bootstrap confidence bound, and catalog coverage also improves.
+
+### Latest full-dataset verification
+
+The local `movielens-v3-eval` run trained on all 20,000,263 source ratings and evaluated
+a seeded sample of 2,000 eligible users. It correctly finished as `validated: false`:
+
+| System | NDCG@10 | Recall@10 | Catalog coverage |
+| --- | ---: | ---: | ---: |
+| Popularity-quality | 0.0993 | 0.0564 | 0.0038 |
+| Static CF | 0.0856 | 0.0438 | 0.2447 |
+| Recent-context CF | 0.0774 | 0.0404 | 0.2740 |
+| Hybrid | 0.0765 | 0.0360 | 0.2550 |
+
+The hybrid substantially expands coverage, but neither moderate nor volatile users
+showed a statistically positive ranking gain over popularity. A production run should
+not be promoted until model iteration passes those gates.
+
 ---
 
 ## 📌 Overview

@@ -2,10 +2,156 @@
 
 ## Complete Technical Handover Document
 
-**Project Status:** Core ML System Complete (Stages 0–11)
+**Project Status:** V4 live recommendation layer implemented; promotion remains evaluation-gated
 **Dataset:** MovieLens (20M Ratings)
 **Domain:** Personalized Movie Recommendation Systems
 **Prepared For:** Future Engineer / ML Researcher / Backend Developer / Product Engineer
+
+> **Authoritative implementation notice:** `src/tenflix` and `configs/v3.yaml` define
+> current behavior. The v1/v2 notebooks are historical. Their saved drift measurements
+> and temporal/hybrid evaluation results must not be used as evidence of model quality.
+
+> **V4 notice:** `src/tenflix/v4` and `configs/v4.yaml` now define the active
+> web-app-facing recommendation layer. V3 remains available as the benchmark and is not
+> silently migrated into schema-4 artifacts.
+
+---
+
+# V4 Live Recommendation Handover
+
+V4 closes the largest gap between the MovieLens experiment and the planned web app:
+new ratings can change one user's recommendations immediately without retraining global
+item factors.
+
+## Runtime flow
+
+```text
+RatingRepository + CatalogRepository
+              ↓
+typed rating history and availability
+              ↓
+long-term and eligible recent fold-in profiles
+              ↓
+MF + content + quality/popularity + exploration candidates
+              ↓
+lifecycle-aware linear reranker
+              ↓
+freshness bounds + MMR diversity + evidence explanation
+              ↓
+RecommendationResponse with model/profile versions
+```
+
+## Key semantics
+
+* Onboarding and imported batches inform long-term taste but cannot manufacture drift.
+* Organic/recommendation events and sufficiently separated legacy sessions can establish
+  temporal confidence.
+* Temporal behavior requires at least three sessions, a 90-day lifespan, sufficient old
+  and recent samples, and non-degenerate vectors.
+* Recency is continuous and capped at 0.85; it never deletes the long-term profile.
+* Freshness is a bounded secondary feature with a nonzero floor for classics.
+* Positive and negative rating residuals contribute in opposite directions.
+* Artifacts contain global model state, never live application rating records.
+
+## Operational boundary
+
+V4 supplies in-memory and Parquet adapters plus an optional FastAPI layer. The future
+web backend owns authentication, PostgreSQL persistence, authorization, and durable job
+scheduling. A PostgreSQL adapter should implement the existing repository protocols
+rather than changing recommendation logic.
+
+## Promotion policy
+
+Evaluation uses global train/validation/test time cutoffs. A production artifact can be
+created only from a V4 report marked `validated: true`. Accuracy must beat popularity
+and static MF with positive paired-bootstrap bounds, the temporal component must help
+eligible users, cold-start simulation must improve, coverage/diversity floors must hold,
+and latency/integrity checks must pass.
+
+## Latest V4 verification and exact remaining work
+
+The full `artifacts/movielens-v4-eval` run is complete and remains deliberately
+unvalidated. It evaluated every one of the 4,898 users that had both pre-cutoff context
+and a relevant, historically available test item.
+
+* Full V4 NDCG@10 is 0.1117 versus 0.1048 for popularity and 0.0376 for static MF.
+* Full V4 Recall@10 is 0.0354 versus 0.0306 and 0.0118 respectively.
+* Both overall accuracy comparisons have positive 95% paired-bootstrap lower bounds.
+* Recency-aware MF NDCG@10 is 0.0511 versus 0.0376 for static MF; the eligible-user
+  temporal gate passes with a +0.0322 mean difference and positive confidence bound.
+* The corrected genre-aware cold-start comparison passes by +0.0095 NDCG@10.
+* Genre diversity (0.7814), result integrity, and seeded determinism pass.
+* Catalog coverage is 0.1207, below the required 0.15.
+* Recommendation p95 is 379 ms and fails the 250 ms gate. Fold-in plus recommendation
+  p95 is 409 ms and passes the 500 ms gate.
+
+Therefore the remaining work is model/serving iteration, not missing V4 architecture:
+increase useful tail-catalog exposure without losing the demonstrated accuracy, rerun
+latency after the post-report MMR/catalog caching optimization, then regenerate the full
+evaluation report. Promotion must continue to reject this run until every gate passes.
+
+### Post-evaluation implementation audit
+
+The source was audited after the result above. Fixes include package-safe default
+configuration, regularized single-rating content profiles, consistent hyphenated genre
+tokens, onboarding liked-movie evidence and exclusion, item-bias fallback, preference/time
+aware profile caching, functional FastAPI POST bodies, indexed file-backed user lookup,
+promotion-only serving, historically eligible evaluation denominators, seeded new/cold
+simulations, and training-data-learned reranker normalization with coverage-aware weight
+and MMR tuning. Both old schema-3 and schema-4 artifacts still load, but the saved V4
+metrics predate these changes. A fresh tune/train/evaluate cycle is required.
+
+---
+
+# V3 Remediation Handover
+
+V3 replaces the notebook-only implementation with a reproducible package and CLI.
+
+## Corrected technical foundations
+
+* All temporal user vectors are projected through one SVD item basis. Early/recent
+  vectors can therefore be compared and blended without mixing arbitrary latent axes.
+* Evaluation holds out the final 30% of each user's chronology. Holdout rows do not
+  contribute to centering, factorization, drift, popularity, quality, or seen-item state.
+* Global user, collaborative-item, and catalog-item mappings replace independent Pandas
+  category mappings.
+* Genre similarity is computed from a query/profile against the sparse TF-IDF feature
+  matrix. The former approximately 6 GB dense all-pairs matrix is not created.
+* Recommenders return ranked movie IDs internally and typed `Recommendation` records
+  externally, preventing the v1 DataFrame/list metric mismatch and catalog-order loss.
+* Sparse histories use their actual interaction profile instead of being routed to a
+  generic default genre query.
+* Models, mappings, content features, drift state, and priors are saved atomically in a
+  hash-verified artifact run rather than existing only in notebook memory.
+
+## Evaluation interpretation
+
+V1 reported Static Precision@10 of 0.167 and Temporal/Hybrid Precision@10 of 0.0.
+The personalized zeros were caused by comparing DataFrame column labels to relevant
+movie IDs. Those values are invalid and intentionally have no V3 regression role.
+
+V3 reports Precision, Recall, Hit Rate, MAP, NDCG, novelty, genre diversity, and catalog
+coverage at configured K values. Results are segmented by drift and compared with
+popularity, static CF, and recent-context CF baselines. Business impact remains a
+hypothesis until an online experiment is implemented.
+
+The first full MovieLens v3 evaluation sampled 2,000 eligible users and returned
+`validated: false`. Hybrid NDCG@10 was 0.0765 versus popularity's 0.0993; Hybrid
+Recall@10 was 0.0360 versus 0.0564. Hybrid catalog coverage improved from 0.0038 to
+0.2550. Moderate and volatile confidence intervals crossed zero, so there is currently
+no validated ranking-quality gain. Do not create a production model from this run.
+
+## Operational workflow
+
+1. Run `tenflix prepare-data` to validate the source and create Parquet caches.
+2. Run `tenflix train --mode evaluation` to produce a context-only model and isolated
+   future holdout.
+3. Run `tenflix evaluate` and inspect `evaluation.json` plus its `validated` field.
+4. After model acceptance, run `tenflix train --mode production` to train on all observed
+   interactions. Production runs contain an empty holdout and cannot be evaluated.
+
+Configuration, dataset hashes, environment versions, artifact hashes, drift thresholds,
+and source statistics are captured in each run manifest.
 
 ---
 
