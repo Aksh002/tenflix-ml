@@ -39,14 +39,27 @@ tenflix-v4 preview --run artifacts/movielens-v4-eval --ratings ratings-preview.j
 tenflix-v4 promote --run artifacts/movielens-v4-eval
 ```
 
-`tune` is the expensive full methodology path. For a quick local smoke run it may be
-skipped; `train` then uses `configs/v4.yaml`. When tuning output exists in
+`tune` is the expensive full methodology path and is required before a serious promotion
+attempt. It may be skipped only for a quick local smoke run; `train` then uses the
+untuned defaults in `configs/v4.yaml`. When tuning output exists in
 `data/processed-v4/v4-tuning.json`, training applies the selected MF parameters,
 learned feature statistics, lifecycle weights, and MMR strength automatically.
 
 `promote` refuses any run whose evaluation report does not satisfy every accuracy,
 coverage, diversity, temporal, cold-start, and latency gate. `serve` additionally requires
 a promoted production artifact.
+
+### Full-stack web app upgrade
+
+The repository now includes a product-facing web layer around the promoted V4 artifact:
+
+* Supabase/Postgres repository adapters and schema migration;
+* Supabase Auth JWT verification for authenticated API calls;
+* catalog browsing, current ratings, movie detail, recommendation, and watch-action endpoints;
+* TMDb enrichment support for posters, IMDb/TMDb IDs, watch providers, and Stremio actions;
+* a Next.js App Router frontend under `apps/web` using the Refero brutalist/editorial design system.
+
+See [`docs/web-app-upgrade.md`](docs/web-app-upgrade.md) for the local setup and runbook.
 
 ### Latest V4 full-dataset verification
 
@@ -135,6 +148,10 @@ tenflix evaluate --run artifacts/movielens-v3-eval
 tenflix recommend --run artifacts/movielens-v3-eval --user-id 1 --top-k 10
 tenflix recommend --run artifacts/movielens-v3-eval --genres Action Sci-Fi --top-k 10
 ```
+
+For the Supabase/Postgres web app layer, `.[dev]` now includes the required web
+runtime dependencies. If you only need the product API without test/lint tooling,
+install `python -m pip install -e ".[web]"`.
 
 `evaluate` exits with code 2 when the statistical acceptance gates are not met. A
 completed run is only described as validated when hybrid NDCG@10 and Recall@10 beat
