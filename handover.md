@@ -101,6 +101,12 @@ simulations, and training-data-learned reranker normalization with coverage-awar
 and MMR tuning. Both old schema-3 and schema-4 artifacts still load, but the saved V4
 metrics predate these changes. A fresh tune/train/evaluate cycle is required.
 
+V3's saved report uses a different per-user temporal protocol, so it is retained as an
+informational historical reference rather than used in an invalid paired confidence
+interval. V4 promotion uses popularity and non-recency biased MF evaluated for the same
+users, cutoff, catalog, and test truth. This is the statistically comparable static
+baseline; do not compare V3 and V4 point metrics as though they were paired observations.
+
 ---
 
 # V3 Remediation Handover

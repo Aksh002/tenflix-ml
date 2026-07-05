@@ -1,0 +1,17 @@
+{
+  "ratings": [
+    {
+      "user_id": 999999,
+      "movie_id": 2571,
+      "rating": 5.0,
+      "rated_at": "2025-01-01T00:00:00+00:00",
+      "source": "organic"
+    }
+  ],
+  "preferences": {
+    "preferred_genres": ["Sci-Fi", "Action"],
+    "disliked_genres": ["Horror"],
+    "liked_movie_ids": [2571],
+    "era_preference": "balanced"
+  }
+}
